@@ -7,6 +7,28 @@
 <a name="english"></a>
 ## English
 
+### [v2026.10.04] - 2026-10-04
+
+#### 1. Battery Capacity & Health Telemetry
+- Report true 4500 mAh dual-cell design capacity (`charge_full_design`) instead of 0 or current capacity.
+- Enable OPlus Smart Charge State of Health (`batt_soh` / `soh_support`) tracking nodes.
+
+#### 2. Brownout & Low Battery Throttling
+- Cap CPU OPP frequencies via PMIC MT6359/MT6359P DLPT (15% threshold, bat_percent_limit=15) to prevent sudden voltage drop below 3.4V.
+- Fix PPM v3 power budget bug that choked CPU power to 600 mW; clamp Little to 1.625 GHz, Mid to 1.985 GHz, and Prime to 2.141 GHz with all 8 cores active.
+- Coordinate `cpufreq_schedutil` with `ppm_low_bat_throttle_active` to suppress aggressive frequency ramp-ups under low battery.
+
+#### 3. Touchscreen 360Hz Sampling Persistence
+- Cache and restore 360Hz sampling rate across screen blank/unblank cycles directly in the kernel driver.
+
+#### 4. Scheduler s2idle Suspend Stability
+- Use `ktime_get_mono_fast_ns()` in `walt_suspend()` to eliminate timekeeping `WARN_ON` warnings and lockups.
+
+#### 5. Wi-Fi Debug Logging Silence
+- Mute verbose MediaTek gen4m Wi-Fi debug masks in `wlan_drv_gen4m.ko` and `service.sh`.
+
+---
+
 ### [v2026.09.27] - 2026-09-27
 
 #### 1. Scheduler CPU Hotplug Concurrency & RCU Barrier Fix
@@ -71,6 +93,28 @@
 
 <a name="русский"></a>
 ## Русский
+
+### [v2026.10.04] - 04.10.2026
+
+#### 1. Ёмкость аккумулятора и телеметрия износа (SOH)
+- Отображение честной паспортной ёмкости 4500 мА·ч (`charge_full_design`) вместо 0 или текущей ёмкости.
+- Включение узлов OPlus Smart Charge State of Health (`batt_soh` / `soh_support`) для замера износа батареи.
+
+#### 2. Защита от внезапного отключения (DLPT) и троттлинг
+- Ограничение верхних частот OPP через DLPT на PMIC MT6359/MT6359P (порог 15%, параметр bat_percent_limit=15) для защиты от просадки напряжения ниже 3.4 В.
+- Исправление бага MediaTek PPM v3: вместо удушения бюджета до 600 мВт все 8 ядер остаются активными с мягкими потолками (Little 1.625 ГГц, Mid 1.985 ГГц, Prime 2.141 ГГц).
+- Координация `cpufreq_schedutil` с флагом `ppm_low_bat_throttle_active` для подавления резких скачков частот при низком заряде.
+
+#### 3. Сохранение частоты опроса тача 360 Гц
+- Кэширование и автоматический возврат режима 360 Гц при включении экрана прямо в драйвере ядра.
+
+#### 4. Стабильность планировщика в Suspend-to-Idle (s2idle)
+- Перевод замера времени в `walt_suspend()` на `ktime_get_mono_fast_ns()` для устранения предупреждений `WARN_ON`.
+
+#### 5. Отключение отладочного спама Wi-Fi
+- Глушение избыточных дебаг-масок в драйвере `wlan_drv_gen4m.ko` и скрипте `service.sh`.
+
+---
 
 ### [v2026.09.27] - 27.09.2026
 
