@@ -12,7 +12,7 @@
 #define EVENT_BOOT_COMPLETED 2
 #define EVENT_MODULE_MOUNTED 3
 
-static inline int startswith(char *s, char *prefix)
+static inline int startswith(const char *s, const char *prefix)
 {
 	return strncmp(s, prefix, strlen(prefix));
 }
@@ -29,5 +29,12 @@ static inline int endswith(const char *s, const char *t)
 extern struct cred* ksu_cred;
 extern bool ksu_late_loaded;
 bool ksu_is_manager(void);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) || defined(KSU_COMPAT_HAS_SELINUX_POLICY_STRUCT)
+extern struct selinux_policy *backup_sepolicy;
+#else
+extern struct policydb *backup_policydb;
+extern struct sidtab *backup_sidtab;
+#endif
 
 #endif

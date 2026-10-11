@@ -8,12 +8,16 @@ kernelsu-objs += feature/sucompat.o
 kernelsu-objs += hook/hook_manager.o
 kernelsu-objs += hook/lsm_hooks.o
 kernelsu-objs += hook/setuid_hook.o
+ifeq ($(CONFIG_ARM64),y)
+kernelsu-objs += hook/arm64/patch_memory.o
+endif
 kernelsu-objs += extras.o
 
 kernelsu-objs += infra/file_wrapper.o
 kernelsu-objs += infra/event_queue.o
 kernelsu-objs += infra/seccomp_cache.o
 kernelsu-objs += infra/su_mount_ns.o
+kernelsu-objs += infra/symbol_resolver.o
 
 ifneq ($(CONFIG_KSU_DISABLE_MANAGER),y)
 kernelsu-objs += manager/apk_sign.o
@@ -257,6 +261,17 @@ endif
 ifeq ($(shell grep -q "cpus_ptr;" $(srctree)/include/linux/sched.h; echo $$?),0)
 ccflags-y += -DKSU_COMPAT_HAS_BACKPORTED_CPUS_PTR
 endif
+ifeq ($(shell grep -q "struct sidtab\s\+\*sidtab;" $(srctree)/security/selinux/ss/services.h; echo $$?),0)
+ccflags-y += -DKSU_COMPAT_SIDTAB_AS_REFERENCE
+endif
+ifeq ($(shell grep -q "POLICYDB_CONFIG_ANDROID_NETLINK_ROUTE" $(srctree)/security/selinux/ss/policydb.h; echo $$?),0)
+ccflags-y += -DKSU_COMPAT_HAS_POLICYDB_CONFIG_ANDROID_NETLINK_ROUTE
+endif
+ifeq ($(shell grep -q "POLICYDB_CONFIG_ANDROID_NETLINK_GETNEIGH" $(srctree)/security/selinux/ss/policydb.h; echo $$?),0)
+ccflags-y += -DKSU_COMPAT_HAS_POLICYDB_CONFIG_ANDROID_NETLINK_GETNEIGH
+endif
+ccflags-y += -DKSU_COMPAT_HLIST_FOR_SECURITY_HOOK_LIST
+ccflags-y += -DKSU_COMPAT_SETPROCATTR_USE_NEW_PROTOTYPE
 
 # Handle optional backports
 ifeq ($(shell grep -q "strncpy_from_user_nofault" $(srctree)/include/linux/uaccess.h; echo $$?),0)

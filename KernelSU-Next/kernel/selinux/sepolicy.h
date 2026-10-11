@@ -43,4 +43,7 @@ bool ksu_type_member(struct policydb *db, const char *src, const char *tgt,
 bool ksu_genfscon(struct policydb *db, const char *fs_name, const char *path,
           const char *ctx);
 
+int ksu_dup_policydb(struct policydb *old_db, struct policydb *new_db);
+void ksu_destroy_policydb(struct policydb *db);
+
 #endif

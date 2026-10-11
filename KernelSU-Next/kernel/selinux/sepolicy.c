@@ -9,6 +9,9 @@
 #include <linux/printk.h>
 #include <linux/slab.h>
 #include <linux/version.h>
+#include <linux/vmalloc.h>
+#include <linux/rwlock.h>
+#include <security.h>
 
 #include "sepolicy.h"
 #include "klog.h" // IWYU pragma: keep
@@ -543,14 +546,35 @@ static bool add_filename_trans(struct policydb *db, const char *s,
     if (trans == NULL) {
         trans = (struct filename_trans_datum *)kcalloc(1, sizeof(*trans),
                                                        GFP_ATOMIC);
+        if (!trans) {
+            pr_err("add_filename_trans: Failed to alloc datum\n");
+            return false;
+        }
 		struct filename_trans_key *new_key =
 			(struct filename_trans_key *)kzalloc(sizeof(*new_key), GFP_ATOMIC);
+        if (!new_key) {
+            pr_err("add_filename_trans: Failed to alloc new_key\n");
+            kfree(trans);
+            return false;
+        }
 		*new_key = key;
 		new_key->name = kstrdup(key.name, GFP_ATOMIC);
+        if (!new_key->name) {
+            pr_err("add_filename_trans: Failed to alloc name\n");
+            kfree(new_key);
+            kfree(trans);
+            return false;
+        }
 		trans->next = last;
 		trans->otype = def->value;
-		hashtab_insert(&db->filename_trans, new_key, trans,
-                       filenametr_key_params);
+		if (hashtab_insert(&db->filename_trans, new_key, trans,
+                       filenametr_key_params)) {
+            pr_err("add_filename_trans: hashtab_insert failed\n");
+            kfree(new_key->name);
+            kfree(new_key);
+            kfree(trans);
+            return false;
+        }
 	}
 
 	db->compat_filename_trans_count++;
@@ -628,6 +652,7 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
     type = (struct type_datum *)kzalloc(sizeof(struct type_datum), GFP_ATOMIC);
     if (!type) {
         pr_err("add_type: alloc type_datum failed.\n");
+        db->p_types.nprim--;
         return false;
     }
 
@@ -638,11 +663,16 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
     char *key = kstrdup(type_name, GFP_ATOMIC);
     if (!key) {
         pr_err("add_type: alloc key failed.\n");
+        kfree(type);
+        db->p_types.nprim--;
         return false;
     }
 
     if (symtab_insert(&db->p_types, key, type)) {
         pr_err("add_type: insert symtab failed.\n");
+        kfree(key);
+        kfree(type);
+        db->p_types.nprim--;
         return false;
     }
 
@@ -1045,6 +1075,103 @@ bool ksu_genfscon(struct policydb *db, const char *fs_name, const char *path,
                   const char *ctx)
 {
     return add_genfscon(db, fs_name, path, ctx);
+}
+
+void ksu_destroy_policydb(struct policydb *db)
+{
+    if (db)
+        policydb_destroy(db);
+}
+
+static inline void ksu_lock_sepolicy_legacy(void)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0) && !defined(KSU_COMPAT_HAS_POLICY_MUTEX)
+#if defined(KSU_COMPAT_USE_SELINUX_STATE)
+    read_lock(&selinux_state.ss->policy_rwlock);
+#elif defined(KSU_COMPAT_HAS_EXPORTED_POLICY_RWLOCK)
+    extern rwlock_t policy_rwlock;
+    read_lock(&policy_rwlock);
+#endif
+#endif
+}
+
+static inline void ksu_unlock_sepolicy_legacy(void)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0) && !defined(KSU_COMPAT_HAS_POLICY_MUTEX)
+#if defined(KSU_COMPAT_USE_SELINUX_STATE)
+    read_unlock(&selinux_state.ss->policy_rwlock);
+#elif defined(KSU_COMPAT_HAS_EXPORTED_POLICY_RWLOCK)
+    extern rwlock_t policy_rwlock;
+    read_unlock(&policy_rwlock);
+#endif
+#endif
+}
+
+int ksu_dup_policydb(struct policydb *old_db, struct policydb *new_db)
+{
+    struct policy_file fp = { 0 };
+    void *data;
+    int ret = 0;
+    int len = 0;
+
+    ksu_lock_sepolicy_legacy();
+    len = old_db->len;
+    ksu_unlock_sepolicy_legacy();
+
+    data = vmalloc(len);
+    if (!data) {
+        pr_err("alloc policy len %d\n", len);
+        ret = -ENOMEM;
+        goto out_free_data;
+    }
+
+    fp.data = data;
+    fp.len = len;
+
+    ksu_lock_sepolicy_legacy();
+    ret = policydb_write(old_db, &fp);
+    if (ret) {
+        pr_err("sepolicy: policydb_write: %d\n", ret);
+        ksu_unlock_sepolicy_legacy();
+        goto out_free_data;
+    }
+    ksu_unlock_sepolicy_legacy();
+
+    static const size_t kConfigOff = 20;
+    if (len >= kConfigOff + sizeof(u32)) {
+        u32 *config_ptr = data + kConfigOff;
+#ifdef KSU_COMPAT_HAS_POLICYDB_CONFIG_ANDROID_NETLINK_ROUTE
+        if (old_db->android_netlink_route) {
+            pr_info("adding POLICYDB_CONFIG_ANDROID_NETLINK_ROUTE\n");
+            *config_ptr |= POLICYDB_CONFIG_ANDROID_NETLINK_ROUTE;
+        }
+#endif
+#ifdef KSU_COMPAT_HAS_POLICYDB_CONFIG_ANDROID_NETLINK_GETNEIGH
+        if (old_db->android_netlink_getneigh) {
+            pr_info("adding POLICYDB_CONFIG_ANDROID_NETLINK_GETNEIGH\n");
+            *config_ptr |= POLICYDB_CONFIG_ANDROID_NETLINK_GETNEIGH;
+        }
+#endif
+    }
+
+    fp.data = data;
+    fp.len = len;
+
+    ret = policydb_read(new_db, &fp);
+    if (ret) {
+        pr_err("sepolicy: policydb_read: %d\n", ret);
+        goto out_free_data;
+    }
+
+    new_db->len = old_db->len;
+
+    vfree(data);
+    ret = len;
+    return ret;
+
+out_free_data:
+    vfree(data);
+    return ret;
 }
 
 #ifdef SELINUX_POLICY_INSTEAD_SELINUX_SS

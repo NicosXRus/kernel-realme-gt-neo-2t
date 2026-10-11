@@ -10,12 +10,13 @@
 #include "manager/manager_observer.h"
 #include "manager/throne_tracker.h"
 #include "selinux/selinux.h"
+#include "feature/selinux_hide.h"
 
 bool ksu_module_mounted __read_mostly = false;
 bool ksu_boot_completed __read_mostly = false;
-extern void stop_input_hook();
+extern void stop_input_hook(void);
 
-extern void ksu_avc_spoof_late_init();
+extern void ksu_avc_spoof_late_init(void);
 
 void on_post_fs_data(void)
 {
@@ -31,6 +32,7 @@ void on_post_fs_data(void)
 	ksu_observer_init();
 	// sanity check, this may influence the performance
 	stop_input_hook();
+	ksu_selinux_hide_handle_post_fs_data();
 }
 
 extern void ext4_unregister_sysfs(struct super_block *sb);
@@ -49,9 +51,9 @@ int nuke_ext4_sysfs(const char *mnt)
 		return -ENOENT;
 	}
 
-	struct super_block *sb = path.dentry->d_inode->i_sb;
-	const char *name = sb->s_type->name;
-	if (strcmp(name, "ext4") != 0) {
+	struct super_block *sb = d_inode(path.dentry)->i_sb;
+	const char *name = (sb && sb->s_type) ? sb->s_type->name : NULL;
+	if (!name || strcmp(name, "ext4") != 0) {
 		pr_info("nuke but module aren't mounted\n");
 		path_put(&path);
 		return -EINVAL;
@@ -74,4 +76,5 @@ void on_boot_completed(void)
     pr_info("on_boot_completed!\n");
     track_throne(true);
     ksu_avc_spoof_late_init();
+    ksu_selinux_hide_drop_backup_if_unused();
 }

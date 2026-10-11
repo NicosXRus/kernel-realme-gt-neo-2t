@@ -23,14 +23,91 @@
 #include "linux/lsm_audit.h" // IWYU pragma: keep
 #include "xfrm.h"
 #include "compat/kernel_compat.h"
+#include "feature/selinux_hide.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
 #define SELINUX_POLICY_INSTEAD_SELINUX_SS
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) || defined(KSU_COMPAT_HAS_SELINUX_POLICY_STRUCT)
+struct selinux_policy *backup_sepolicy = NULL;
+#else
+struct policydb *backup_policydb = NULL;
+struct sidtab *backup_sidtab = NULL;
+#endif
+
+extern int policydb_load_isids(struct policydb *p, struct sidtab *s);
+
 #define ALL NULL
 
-static DEFINE_MUTEX(ksu_rules);
+static struct policydb *get_policydb(void);
+
+static void ksu_save_backup_policydb(void)
+{
+	int len = 0;
+	struct policydb *policydb_ptr;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) || defined(KSU_COMPAT_HAS_SELINUX_POLICY_STRUCT)
+	if (backup_sepolicy)
+		return;
+	struct selinux_policy *old_pol = selinux_state.policy;
+	backup_sepolicy = ksu_dup_sepolicy(rcu_dereference_protected(old_pol, lockdep_is_held(&selinux_state.policy_mutex)));
+	if (backup_sepolicy) {
+		backup_sepolicy->sidtab = kzalloc(sizeof(*backup_sepolicy->sidtab), GFP_KERNEL);
+		if (backup_sepolicy->sidtab) {
+			policydb_load_isids(&backup_sepolicy->policydb, backup_sepolicy->sidtab);
+		}
+	}
+#else
+	if (backup_policydb) {
+		pr_info("backup_policydb already exists\n");
+		return;
+	}
+
+	policydb_ptr = get_policydb();
+	if (!policydb_ptr)
+		return;
+
+	backup_policydb = kzalloc(sizeof(*backup_policydb), GFP_KERNEL);
+	if (!backup_policydb) {
+		pr_err("failed to alloc backup_policydb\n");
+		return;
+	}
+
+	len = ksu_dup_policydb(policydb_ptr, backup_policydb);
+	pr_info("len of ksu_dup_policydb (backup_db) output: %d\n", len);
+	if (len < 0) {
+		pr_err("failed to dup backup policydb: %d\n", len);
+		kfree(backup_policydb);
+		backup_policydb = NULL;
+		backup_sidtab = NULL;
+		return;
+	}
+
+	backup_sidtab = kzalloc(sizeof(*backup_sidtab), GFP_KERNEL);
+	if (!backup_sidtab) {
+		pr_err("failed to alloc backup sidtab\n");
+		ksu_destroy_policydb(backup_policydb);
+		kfree(backup_policydb);
+		backup_policydb = NULL;
+		return;
+	}
+
+	sidtab_init(backup_sidtab);
+	int ret = policydb_load_isids(backup_policydb, backup_sidtab);
+	if (ret) {
+		pr_err("failed to load isids for backup sepolicy: %d!\n", ret);
+		kfree(backup_sidtab);
+		ksu_destroy_policydb(backup_policydb);
+		kfree(backup_policydb);
+		backup_policydb = NULL;
+		backup_sidtab = NULL;
+		return;
+	}
+
+	pr_info("backup sepolicy success!\n");
+#endif
+}
 
 static struct policydb *get_policydb(void)
 {
@@ -56,7 +133,7 @@ extern int avc_ss_reset(u32 seqno);
 extern int avc_ss_reset(struct selinux_avc *avc, u32 seqno);
 #endif
 // reset avc cache table, otherwise the new rules will not take effect if already denied
-static void reset_avc_cache()
+static void reset_avc_cache(void)
 {
 #if ((!defined(KSU_COMPAT_USE_SELINUX_STATE)) || \
 	LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0))
@@ -204,6 +281,9 @@ void apply_kernelsu_rules()
 	if (!getenforce()) {
 		pr_info("SELinux permissive or disabled, apply rules!\n");
 	}
+
+	ksu_save_backup_policydb();
+	ksu_selinux_hide_setup_default();
 
 #ifdef SELINUX_POLICY_INSTEAD_SELINUX_SS
 	struct selinux_policy *pol, *old_pol = selinux_state.policy;

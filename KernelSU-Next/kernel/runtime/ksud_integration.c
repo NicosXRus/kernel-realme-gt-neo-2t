@@ -39,6 +39,7 @@
 #include "ksud_boot.h"
 #include "selinux/selinux.h"
 #include "compat/kernel_compat.h"
+#include "feature/selinux_hide.h"
 
 static const char KERNEL_SU_RC[] =
 	"\n"
@@ -63,9 +64,9 @@ static const char KERNEL_SU_RC[] =
 
 	"\n";
 
-void stop_init_rc_hook();
-void stop_execve_hook();
-void stop_input_hook();
+void stop_init_rc_hook(void);
+void stop_execve_hook(void);
+void stop_input_hook(void);
 
 #ifdef KSU_KPROBES_HOOK
 static struct work_struct __maybe_unused stop_init_rc_hook_work;
@@ -177,6 +178,7 @@ static bool check_argv(struct user_arg_ptr argv, int index,
 
 static void ksu_initialize_selinux_tw_func(struct callback_head *cb)
 {
+	ksu_selinux_hide_handle_second_stage();
 	apply_kernelsu_rules();
 	cache_sid();
 	setup_ksu_cred();
@@ -240,6 +242,7 @@ int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
 		    check_argv(*argv, 1, "--second-stage", buf, sizeof(buf))) {
 			/* This applies to versions between Android 6 ~ 7 */
 			pr_info("/init second_stage executed\n");
+			ksu_selinux_hide_handle_second_stage();
 			apply_kernelsu_rules();
 			setup_ksu_cred();
 			init_second_stage_executed = true;
@@ -271,6 +274,7 @@ int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
 					    (!strcmp(env_value, "1") ||
 					     !strcmp(env_value, "true"))) {
 						pr_info("/init second_stage executed\n");
+						ksu_selinux_hide_handle_second_stage();
 						apply_kernelsu_rules();
 						setup_ksu_cred();
 						init_second_stage_executed = true;
@@ -839,7 +843,7 @@ void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_pt
 
 #endif
 
-void stop_init_rc_hook()
+void stop_init_rc_hook(void)
 {
 #ifdef KSU_KPROBES_HOOK
 	bool ret = schedule_work(&stop_init_rc_hook_work);
@@ -850,7 +854,7 @@ void stop_init_rc_hook()
 #endif
 }
 
-void stop_execve_hook()
+void stop_execve_hook(void)
 {
 #ifdef KSU_KPROBES_HOOK
 	bool ret = schedule_work(&stop_execve_hook_work);
@@ -861,7 +865,7 @@ void stop_execve_hook()
 #endif
 }
 
-void stop_input_hook()
+void stop_input_hook(void)
 {
 #ifdef KSU_KPROBES_HOOK
 	static bool input_hook_stopped = false;
@@ -882,7 +886,7 @@ void stop_input_hook()
 
 
 // ksud: module support
-void __init ksu_ksud_init()
+void __init ksu_ksud_init(void)
 {
 #ifdef KSU_KPROBES_HOOK
 	int ret;
@@ -905,7 +909,7 @@ void __init ksu_ksud_init()
 #endif
 }
 
-void __exit ksu_ksud_exit()
+void __exit ksu_ksud_exit(void)
 {
 #ifdef KSU_KPROBES_HOOK
 	unregister_kprobe(&execve_kp);

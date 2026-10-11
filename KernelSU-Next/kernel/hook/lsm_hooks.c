@@ -4,6 +4,14 @@
 #include <linux/binfmts.h>
 #include <linux/err.h>
 #include <linux/atomic.h>
+#include <linux/fs.h>
+#include <linux/dcache.h>
+#include <linux/sched.h>
+#include <linux/signal.h>
+#include <linux/cred.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
+#include <linux/sched/signal.h>
+#endif
 
 #include "klog.h" // IWYU pragma: keep
 #include "runtime/ksud_boot.h"
@@ -33,6 +41,48 @@ static int ksu_key_permission(key_ref_t key_ref, const struct cred *cred,
 }
 #endif
 
+static inline bool is_ksud_dentry(struct dentry *dentry)
+{
+	char path[128];
+	char *buf;
+
+	if (!dentry)
+		return false;
+
+	if (strcmp(dentry->d_name.name, "ksud"))
+		return false;
+
+	buf = dentry_path_raw(dentry, path, sizeof(path));
+	if (IS_ERR(buf))
+		return false;
+
+	return (!strcmp(buf, "/data/adb/ksud") || !strcmp(buf, "/adb/ksud"));
+}
+
+static inline bool is_ksud_protected_dir(struct dentry *dentry)
+{
+	char path[128];
+	char *buf;
+
+	if (!dentry)
+		return false;
+
+	if (strcmp(dentry->d_name.name, "adb") && strcmp(dentry->d_name.name, "ksu"))
+		return false;
+
+	buf = dentry_path_raw(dentry, path, sizeof(path));
+	if (IS_ERR(buf))
+		return false;
+
+	if (!strcmp(buf, "/data/adb") || !strcmp(buf, "/adb"))
+		return true;
+
+	if (!strcmp(buf, "/data/adb/ksu") || !strcmp(buf, "/adb/ksu"))
+		return true;
+
+	return false;
+}
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
 static int ksu_inode_rename(struct mnt_idmap *idmap, struct inode *old_dir, struct dentry *old_dentry,
 			    struct inode *new_dir, struct dentry *new_dentry)
@@ -47,6 +97,15 @@ static int ksu_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
 	// skip kernel threads
 	if (!current->mm) {
 		return 0;
+	}
+
+	if (current_uid().val != 0) {
+		if (is_ksud_dentry(old_dentry) || is_ksud_dentry(new_dentry) ||
+		    is_ksud_protected_dir(old_dentry) || is_ksud_protected_dir(new_dentry)) {
+			pr_warn("ksu: blocked unauthorized rename involving ksud by uid %d (comm: %s)\n",
+				current_uid().val, current->comm);
+			return -EPERM;
+		}
 	}
 
 	// skip non system uid
@@ -99,6 +158,95 @@ static int ksu_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
 	return 0;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+static int ksu_inode_unlink(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
+static int ksu_inode_unlink(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry)
+#else
+static int ksu_inode_unlink(struct inode *dir, struct dentry *dentry)
+#endif
+{
+	if (!current->mm || current_uid().val == 0)
+		return 0;
+
+	if (is_ksud_dentry(dentry)) {
+		pr_warn("ksu: blocked unauthorized unlink of ksud by uid %d (comm: %s)\n",
+			current_uid().val, current->comm);
+		return -EPERM;
+	}
+
+	return 0;
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+static int ksu_inode_rmdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
+static int ksu_inode_rmdir(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry)
+#else
+static int ksu_inode_rmdir(struct inode *dir, struct dentry *dentry)
+#endif
+{
+	if (!current->mm || current_uid().val == 0)
+		return 0;
+
+	if (is_ksud_protected_dir(dentry)) {
+		pr_warn("ksu: blocked unauthorized rmdir of %s by uid %d (comm: %s)\n",
+			dentry->d_name.name, current_uid().val, current->comm);
+		return -EPERM;
+	}
+
+	return 0;
+}
+
+static int ksu_file_permission(struct file *file, int mask)
+{
+	if (!current->mm || current_uid().val == 0)
+		return 0;
+
+	if (!(mask & (MAY_WRITE | MAY_APPEND)))
+		return 0;
+
+	if (!file)
+		return 0;
+
+	if (is_ksud_dentry(file->f_path.dentry)) {
+		pr_warn("ksu: blocked unauthorized write/truncate of ksud by uid %d (comm: %s)\n",
+			current_uid().val, current->comm);
+		return -EPERM;
+	}
+
+	return 0;
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
+static int ksu_task_kill(struct task_struct *p, struct kernel_siginfo *info,
+			 int sig, const struct cred *cred)
+#else
+static int ksu_task_kill(struct task_struct *p, struct siginfo *info,
+			 int sig, const struct cred *cred)
+#endif
+{
+	uid_t caller_uid;
+
+	if (!p)
+		return 0;
+
+	if (sig != SIGKILL && sig != SIGTERM && sig != SIGSTOP)
+		return 0;
+
+	caller_uid = cred ? cred->uid.val : current_uid().val;
+	if (caller_uid == 0)
+		return 0;
+
+	if (task_uid(p).val == 0 && !strcmp(p->comm, "ksud")) {
+		pr_warn("ksu: blocked signal %d to ksud (pid %d) from uid %d (comm: %s)\n",
+			sig, p->pid, caller_uid, current->comm);
+		return -EPERM;
+	}
+
+	return 0;
+}
+
 static int ksu_task_fix_setuid(struct cred *new, const struct cred *old,
 			       int flags)
 {
@@ -114,16 +262,13 @@ static int ksu_task_fix_setuid(struct cred *new, const struct cred *old,
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
-int ksu_inode_permission(struct mnt_idmap *idmap, struct inode *inode, int mask)
+static int ksu_inode_permission(struct mnt_idmap *idmap, struct inode *inode, int mask)
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
-int ksu_inode_permission(struct user_namespace *mnt_userns, struct inode *inode, int mask)
+static int ksu_inode_permission(struct user_namespace *mnt_userns, struct inode *inode, int mask)
 #else
-int ksu_inode_permission(struct inode *inode, int mask)
+static int ksu_inode_permission(struct inode *inode, int mask)
 #endif
 {
-	if (unlikely(inode && inode->i_sb && inode->i_sb->s_magic == DEVPTS_SUPER_MAGIC)) {
-		// __ksu_handle_devpts(inode);
-	}
 	return 0;
 }
 
@@ -134,6 +279,10 @@ static struct security_hook_list ksu_hooks[] = {
 #endif
 	LSM_HOOK_INIT(inode_permission, ksu_inode_permission),
 	LSM_HOOK_INIT(inode_rename, ksu_inode_rename),
+	LSM_HOOK_INIT(inode_unlink, ksu_inode_unlink),
+	LSM_HOOK_INIT(inode_rmdir, ksu_inode_rmdir),
+	LSM_HOOK_INIT(file_permission, ksu_file_permission),
+	LSM_HOOK_INIT(task_kill, ksu_task_kill),
 	LSM_HOOK_INIT(task_fix_setuid, ksu_task_fix_setuid)
 };
 
