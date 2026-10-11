@@ -176,10 +176,8 @@ struct scan_control {
 #define prefetchw_prev_lru_page(_page, _base, _field) do { } while (0)
 #endif
 
-/*
- * From 0 .. 200.  Higher means more swappy.
- */
-int vm_swappiness = 60;
+/* Prefer zRAM over dropping page cache to keep app assets hot */
+int vm_swappiness = 100;
 #if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
 /*
  * Direct reclaim swappiness, exptct 0 - 60. Higher means more swappy and slower.

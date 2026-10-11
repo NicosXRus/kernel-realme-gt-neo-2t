@@ -137,11 +137,9 @@
         fi
     done
 
-    write_node /proc/sys/vm/swappiness 20
-    write_node /proc/sys/vm/vfs_cache_pressure 70
-    write_node /proc/sys/vm/dirty_expire_centisecs 200
-    write_node /proc/sys/vm/dirty_writeback_centisecs 100
-    write_node /proc/sys/vm/dirty_ratio 20
+    write_node /proc/sys/vm/swappiness 100
+    write_node /proc/sys/vm/watermark_scale_factor 150
+    write_node /proc/sys/vm/vfs_cache_pressure 100
 
     # TCP tuning
     write_node /proc/sys/net/ipv4/tcp_congestion_control cubic

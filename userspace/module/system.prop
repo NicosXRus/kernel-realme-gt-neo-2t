@@ -5,3 +5,4 @@ dalvik.vm.heapsize=768m
 dalvik.vm.heaptargetutilization=0.70
 dalvik.vm.heapminfree=12m
 dalvik.vm.heapmaxfree=48m
+dalvik.vm.dex2oat64.enabled=true
