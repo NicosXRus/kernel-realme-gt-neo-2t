@@ -1,6 +1,6 @@
 # Realme GT Neo 2T (RMX3357) Userspace Scripts & Module
 
-Companion components for **KernelSU-Next** on Android 13 / realme UI 4.0 (`RMX3357_13.1.0.500(CN01)`). Version: **v2026.10.04**.
+Companion components for **KernelSU-Next** on Android 13 / realme UI 4.0 (`RMX3357_13.1.0.500(CN01)`). Version: **v2026.10.13**.
 
 [English](#english) | [Русский](#русский)
 
@@ -25,13 +25,13 @@ userspace/
 
 #### `service.sh` & `system.prop`
 
-`system.prop` applies ART Dalvik VM heap bounds (`dalvik.vm.heapstartsize=12m`, `dalvik.vm.heapgrowthlimit=512m`, `dalvik.vm.heapsize=768m`, `dalvik.vm.heaptargetutilization=0.70`, `dalvik.vm.heapminfree=12m`, `dalvik.vm.heapmaxfree=48m`) via KernelSU `resetprop` prior to `zygote64` initialization. `service.sh` runs once after `/data` decryption and `sys.boot_completed=1`:
+`system.prop` applies ART Dalvik VM heap bounds (`dalvik.vm.heapstartsize=12m`, `dalvik.vm.heapgrowthlimit=512m`, `dalvik.vm.heapsize=768m`, `dalvik.vm.heaptargetutilization=0.70`, `dalvik.vm.heapminfree=12m`, `dalvik.vm.heapmaxfree=48m`, `dalvik.vm.dex2oat64.enabled=true`) via KernelSU `resetprop` prior to `zygote64` initialization. `service.sh` runs once after `/data` decryption and `sys.boot_completed=1`:
 
 *   **Telemetry Cleanup**: Stops MediaTek debug loggers (`emdlogger`, `connsyslogger`, `mobile_log_d`, `bt_dump`, `wifi_dump`, `netdiag`) and ColorOS crash uploaders (`criticallog`, `common_dcs`, `phoenix_log_manager`). Mutes kernel-level Wi-Fi driver debug spam via `/proc/net/wlan/dbgLevel`. Keeps `oiface` alive for gaming GPU DVFS.
 *   **SurfaceFlinger Tuning**: Utilizes native ColorOS 13.1 dynamic duration engine (`vendor.debug.sf.dynamic_duration.*`) and removes legacy static overrides.
 *   **ART Runtime Bounds**: Configures Dalvik heap sizes proportional to physical RAM, preventing GC stutter and early background process eviction.
 *   **Schedutil & GED GPU DVFS**: Manages cluster frequency caps and transition rate limits via `/proc/sys/kernel/sched_power_profile`, and sets GED GPU DVFS headroom via `/sys/kernel/ged/hal/dvfs_margin_value` (`15`) and `/sys/module/ged/parameters/gx_fb_dvfs_margin` (`150`).
-*   **Cpusets & UFS 3.1 Storage Queue Tuning**: Allocates top-app tasks to Prime/Mid cores (`0-7`), confines background work to Little cores (`0-3`), and tunes UFS 3.1 `sd*` block queues (`nr_requests=256`, `read_ahead_kb=256`, `rq_affinity=1`, `nomerges=0`, `add_random=0`).
+*   **Cpusets & UFS 3.1 Storage Queue Tuning**: Allocates top-app tasks to Prime/Mid cores (`0-7`), confines background work to Little cores (`0-3`), and tunes UFS 3.1 `sd*` block queues (`nr_requests=256`, `read_ahead_kb=256`, `rq_affinity=1`, `nomerges=0`, `add_random=0`). VM parameters (`vm_swappiness=100`, `watermark_scale_factor=150`, `vfs_cache_pressure=100`) and the `noop` scheduler are enforced natively and reapplied by the companion boot service to prevent vendor init script overrides.
 *   **TCP Network Stack**: Enforces `tcp_congestion_control=cubic`, enables `tcp_fastopen=3`, sets `tcp_ecn=2` to prevent carrier CGNAT blackholing, and disables `tcp_slow_start_after_idle` and `tcp_autocorking`.
 *   **Three-Layer Bluetooth LDAC Little-Core Isolation**: Confines high-bitrate LDAC audio processing to Cortex-A55 Little cores (0–3) using fork-free shell built-ins (`read -r comm < "$task/comm"`, `${task##*/}`) and `cgroup.procs`:
     *   *Layer 1 (Audio Stack & Encoder)*: Pins `com.android.bluetooth` threads (`bt_a2dp_source_` [LDAC encoder], `bt_stack_manage`, `BluetoothA2dpLo`, `bta_media_*`) to `/dev/cpuset/system-background/tasks` and cores 0–3 (`taskset -p 0f`).
@@ -85,13 +85,13 @@ userspace/
 
 #### `service.sh` и `system.prop`
 
-Файл `system.prop` применяет параметры кучи ART (`dalvik.vm.heapstartsize=12m`, `dalvik.vm.heapgrowthlimit=512m`, `dalvik.vm.heapsize=768m`, `dalvik.vm.heaptargetutilization=0.70`, `dalvik.vm.heapminfree=12m`, `dalvik.vm.heapmaxfree=48m`) через `resetprop` в KernelSU ещё до инициализации `zygote64`. Скрипт `service.sh` выполняется однократно после расшифровки `/data` и установки флага `sys.boot_completed=1`:
+Файл `system.prop` применяет параметры кучи ART (`dalvik.vm.heapstartsize=12m`, `dalvik.vm.heapgrowthlimit=512m`, `dalvik.vm.heapsize=768m`, `dalvik.vm.heaptargetutilization=0.70`, `dalvik.vm.heapminfree=12m`, `dalvik.vm.heapmaxfree=48m`, `dalvik.vm.dex2oat64.enabled=true`) через `resetprop` в KernelSU ещё до инициализации `zygote64`. Скрипт `service.sh` выполняется однократно после расшифровки `/data` и установки флага `sys.boot_completed=1`:
 
 *   **Очистка от телеметрии**: Останавливает фоновые дамперы MediaTek (`emdlogger`, `connsyslogger`, `mobile_log_d`, `bt_dump`, `wifi_dump`, `netdiag`) и службы сбора отчётов ColorOS (`criticallog`, `common_dcs`, `phoenix_log_manager`). Глушит отладочный спам драйвера Wi-Fi через `/proc/net/wlan/dbgLevel`. Сохраняет `oiface` активным для работы игрового GPU DVFS.
 *   **Настройка SurfaceFlinger**: Задействует штатный движок динамической длительности ColorOS 13.1 (`vendor.debug.sf.dynamic_duration.*`) и убирает устаревшие статические задержки.
 *   **Границы кучи ART**: Выставляет размеры кучи Dalvik пропорционально объёму физической памяти при загрузке, предотвращая микрофризы сборщика мусора и раннюю выгрузку фоновых приложений.
 *   **Говернор Schedutil и GED GPU DVFS**: Управляет частотными лимитами кластеров и задержками переключения через ядерный узел `/proc/sys/kernel/sched_power_profile`, а также задаёт порог запаса GPU DVFS через `/sys/kernel/ged/hal/dvfs_margin_value` (`15`) и `/sys/module/ged/parameters/gx_fb_dvfs_margin` (`150`).
-*   **Cpusets и настройка очередей UFS 3.1**: Выделяет ядра Prime/Mid (`0-7`) под активные приложения, изолирует фоновые процессы на ядрах Little (`0-3`) и настраивает очереди блочных устройств UFS 3.1 `sd*` (`nr_requests=256`, `read_ahead_kb=256`, `rq_affinity=1`, `nomerges=0`, `add_random=0`).
+*   **Cpusets и настройка очередей UFS 3.1**: Выделяет ядра Prime/Mid (`0-7`) под активные приложения, изолирует фоновые процессы на ядрах Little (`0-3`) и настраивает очереди блочных устройств UFS 3.1 `sd*` (`nr_requests=256`, `read_ahead_kb=256`, `rq_affinity=1`, `nomerges=0`, `add_random=0`). Параметры виртуальной памяти (`vm_swappiness=100`, `watermark_scale_factor=150`, `vfs_cache_pressure=100`) и планировщик `noop` зафиксированы на уровне ядра и повторно закрепляются сервисом компаньона, защищая от перезаписи скриптами инициализации вендора.
 *   **Сетевой стек TCP**: Устанавливает алгоритм контроля перегрузки `tcp_congestion_control=cubic`, включает `tcp_fastopen=3`, переводит ECN в надёжный режим ответа `tcp_ecn=2` для защиты от сброса соединений в CGNAT операторов и отключает `tcp_slow_start_after_idle` и `tcp_autocorking`.
 *   **Трёхуровневая аппаратная изоляция Bluetooth LDAC на малых ядрах Cortex-A55 (ядра 0–3)**: Выполняется без порождения лишних подпроцессов за счёт встроенных операций чтения оболочки (`read -r comm < "$task/comm"`, `${task##*/}`) и пакетной миграции через `cgroup.procs`:
     *   *Уровень 1 (Потоки кодека и аудиостека)*: Потоки процесса `com.android.bluetooth` (`bt_a2dp_source_` [LDAC encoder], `bt_stack_manage`, `BluetoothA2dpLo`, `bta_media_*`) заблокированы на ядра 0–3 через `/dev/cpuset/system-background/tasks` и `taskset -p 0f`.

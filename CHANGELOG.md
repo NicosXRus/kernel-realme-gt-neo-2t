@@ -7,6 +7,44 @@
 <a name="english"></a>
 ## English
 
+### [v2026.10.13] - 2026-10-13
+
+#### 1. In-Tree KernelSU-Next v3.4.1+ (dev 0a77550c, UAPI 5, build 33333)
+- Update KernelSU-Next to v3.4.1+ dev snapshot (`0a77550c`) with UAPI v5 protocol.
+- Integrate scoped descriptors with `EVENT_SERVICES` support.
+- Deferred throne tracking via `task_work` and cached APK path lookups.
+- In-kernel module blacklisting (`kernelsu.block_modules`) and ADB-only su mode.
+- Enforce KernelSU feature locks (`kernel_umount:1`) via boot cmdline injection during packaging.
+
+#### 2. BakaSU SELinux Hiding & Dynamic LSM Hooks
+- Backport `selinux_hide` for in-kernel concealment of SELinux status and custom rules from root detection algorithms.
+- Implement dynamic symbol resolver (`symbol_resolver.c`) and AArch64 memory patcher (`patch_memory.c`, `lsm_hooks.c`) to hook LSM tables directly in memory without exported `security_hook_heads`.
+- Add `adb_root` support, manager APK certificate validation (`apk_sign.c`), and throne tracker package observer.
+- Protect root daemon and su sessions against Android process group termination by migrating to init PGID (`KSU_IOCTL_SET_INIT_PGRP`).
+
+#### 3. Virtual Memory, ZRAM & UFS 3.1 Performance Tuning
+- Set default `vm_swappiness = 100` to migrate cold anonymous memory to ZRAM and keep physical RAM free for camera bursts while preserving hot file caches.
+- Bump `watermark_scale_factor = 150` (1.5% RAM buffer) to eliminate direct reclaim stalls during 120 Hz render bursts.
+- Switch default I/O scheduler to `noop` (`CONFIG_DEFAULT_NOOP=y`, `CONFIG_DEFAULT_IOSCHED="noop"`) to leverage UFS 3.1 hardware multi-circular queue (MCQ) dispatching and cut CPU overhead.
+- Debloat `service.sh` by removing redundant sysctl overrides handled by kernel defaults.
+- Enable 64-bit DEX2OAT compilation via `dalvik.vm.dex2oat64.enabled=true` in `system.prop`.
+
+#### 4. Clang 12 Toolchain Build Fixes
+- Fix explicit type casts and signedness warnings in scheduler (`eas_plus.c`), hybridswap (`hybridswap_stats.c`), and `kernel/sysctl.c`.
+
+#### 5. Hardware Diagnostics, Ramoops & USB Serial Console
+- Enable `CONFIG_SECURITY_SELINUX_BOOTPARAM=y` to permit boot-time SELinux mode override via `selinux=0` or `enforcing=0` in bootloader cmdline.
+- Unmask `CONFIG_PSTORE_RAM=y` to activate Ramoops persistent crash logging across warm reboots in reserved RAM (`0x48090000`).
+- Enable kernel console output over hardware USB-UART adapters (`CONFIG_USB_SERIAL_CONSOLE=y`).
+- Add virtual COM port support via Android ConfigFS (`CONFIG_USB_CONFIGFS_SERIAL=y`, `CONFIG_U_SERIAL_CONSOLE=y`) and build loadable serial gadget module `g_serial.ko` (`CONFIG_USB_G_SERIAL=m`) while preserving wired ADB and MTP file transfer.
+- Enable ring buffer timestamps (`CONFIG_PRINTK_TIME=y`) and runtime driver debug control via `/sys/kernel/debug/dynamic_debug/control` (`CONFIG_DYNAMIC_DEBUG=y`).
+
+#### 6. Standalone Kernel Binary (Image.gz)
+- Build and package raw compressed kernel binary `Image.gz` alongside fastboot boot images.
+- Designed for custom recovery zip installers (AnyKernel3) and manual repacking with alternative ramdisk/DTB trees without unpacking `boot.img`.
+
+---
+
 ### [v2026.10.04] - 2026-10-04
 
 #### 1. Battery Capacity & Health Telemetry
@@ -93,6 +131,45 @@
 
 <a name="русский"></a>
 ## Русский
+
+### [v2026.10.13] - 13.10.2026
+
+#### 1. Обновление KernelSU-Next до v3.4.1+ (dev 0a77550c, UAPI 5, build 33333)
+- Обновление встроенного KernelSU-Next до dev-среза v3.4.1+ (`0a77550c`) с протоколом UAPI v5.
+- Поддержка изолированных дескрипторов с событием `EVENT_SERVICES`.
+- Отложенная проверка менеджера (throne tracking) через `task_work` и кэширование путей APK.
+- Блокировка модулей на уровне ядра (`kernelsu.block_modules`) и ограничение `su` только сессиями ADB.
+- Аппаратная фиксация функций KernelSU (`kernel_umount:1`) через cmdline заголовка boot.img при сборке.
+
+#### 2. Скрытие SELinux и динамические LSM-хуки (BakaSU)
+- Модуль `selinux_hide` в ядре динамически скрывает статус и добавленные правила SELinux от проверок рут-детекта.
+- Динамический резолвер символов (`symbol_resolver.c`) и патчер памяти AArch64 (`patch_memory.c`, `lsm_hooks.c`) внедряют хуки в таблицы LSM напрямую в памяти ядра без необходимости экспорта `security_hook_heads`.
+- Поддержка `adb_root`, проверка подлинности APK менеджера по сертификату (`apk_sign.c`) и отслеживание установки пакетов (throne tracker).
+- Защита демона и сессий root от принудительного завершения системой Android путём переноса в PGID процесса init (`KSU_IOCTL_SET_INIT_PGRP`).
+
+#### 3. Тюнинг виртуальной памяти, ZRAM и UFS 3.1
+- Значение по умолчанию `vm_swappiness = 100` для своевременного вытеснения неактивных страниц в ZRAM и сохранения свободной оперативной памяти под пиковые нагрузки (съёмка фото, запуск приложений).
+- Значение по умолчанию `watermark_scale_factor = 150` (буфер 1.5% RAM) для исключения задержек прямого сброса страниц (direct reclaim) при частоте обновления 120 Гц.
+- Планировщик по умолчанию `noop` (`CONFIG_DEFAULT_NOOP=y`, `CONFIG_DEFAULT_IOSCHED="noop"`) под аппаратные очереди контроллера UFS 3.1 (MCQ), разгружающий процессор от ненужной программной пересортировки.
+- Очистка `service.sh` от избыточных вызовов sysctl, параметры которых встроены в ядро по умолчанию.
+- Включение 64-битной компиляции DEX2OAT (`dalvik.vm.dex2oat64.enabled=true`) в `system.prop`.
+
+#### 4. Исправление сборки под Clang 12
+- Устранены предупреждения о типах и знаковости в `eas_plus.c`, `hybridswap_stats.c` и `kernel/sysctl.c`.
+
+#### 5. Диагностика, краш-дампы в ОЗУ (Ramoops) и USB-консоль
+- Включён `CONFIG_SECURITY_SELINUX_BOOTPARAM=y` для переопределения режима SELinux на этапе загрузки аргументом `selinux=0` в cmdline.
+- Разблокирован `CONFIG_PSTORE_RAM=y` для сохранения дампов паник и сообщений `dmesg` (Ramoops) в зарезервированной области ОЗУ (`0x48090000`) при мягкой перезагрузке.
+- Включён вывод ранней консоли ядра на аппаратные адаптеры USB-UART (`CONFIG_USB_SERIAL_CONSOLE=y`).
+- Добавлена поддержка виртуального COM-порта в Android ConfigFS (`CONFIG_USB_CONFIGFS_SERIAL=y`, `CONFIG_U_SERIAL_CONSOLE=y`) и сборка модуля `g_serial.ko` (`CONFIG_USB_G_SERIAL=m`) без нарушения работы проводного ADB и передачи MTP.
+- Включены временные метки сообщений (`CONFIG_PRINTK_TIME=y`) и динамическое управление отладкой драйверов на лету через `/sys/kernel/debug/dynamic_debug/control` (`CONFIG_DYNAMIC_DEBUG=y`).
+
+#### 6. Поставка чистого бинарника ядра Image.gz
+- В пайплайн CI добавлена публикация чистого сжатого ядра Linux `Image.gz` отдельно от готового образа `boot.img`.
+- Предназначен для использования в кастомных установщиках (AnyKernel3) и ручной перепаковки с альтернативными ramdisk или DTB без необходимости предварительной распаковки готового `boot.img`.
+- Для стандартной прошивки через fastboot по-прежнему используется готовый перепакованный образ раздела `boot-rmx3357-neocore.img`.
+
+---
 
 ### [v2026.10.04] - 04.10.2026
 

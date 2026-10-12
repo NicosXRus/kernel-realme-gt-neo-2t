@@ -2,7 +2,8 @@
 
 [![Kernel Version](https://img.shields.io/badge/Linux-4.19.191-blue.svg)](https://kernel.org/)
 [![Device](https://img.shields.io/badge/Device-Realme%20GT%20Neo%202T%20(RMX3357)-brightgreen.svg)](https://github.com/realme-kernel-opensource/realme_X7max_GTneo_GTneo2T-AndroidT-kernel-source)
-[![KernelSU-Next](https://img.shields.io/badge/KernelSU--Next-v3.4.0--legacy-success.svg)](https://github.com/rifsxd/KernelSU-Next)
+[![KernelSU-Next](https://img.shields.io/badge/KernelSU--Next-v3.4.1%2B-success.svg)](https://github.com/KernelSU-Next/KernelSU-Next)
+[![BakaSU](https://img.shields.io/badge/BakaSU-Integrated-orange.svg)](https://github.com/Baka-SU/BakaSU)
 [![SuSFS](https://img.shields.io/badge/SuSFS-v1.5.5-blueviolet.svg)](https://gitlab.com/simonpunk/susfs4ksu)
 
 [English](#english) | [Русский](#русский)
@@ -13,16 +14,20 @@
 ## English
 
 Custom Linux 4.19.191 kernel for **Realme GT Neo 2T** (`RMX3357` / `RE5469`) on **MediaTek Dimensity 1200 5G** (`MT6893`).  
-Built for stock firmware **`RMX3357_13.1.0.500(CN01)`** (realme UI 4.0 / Android 13). Version: **v2026.10.04**.
+Built for stock firmware **`RMX3357_13.1.0.500(CN01)`** (realme UI 4.0 / Android 13). Version: **v2026.10.13**.
 
 **Highlights:**
-- Built-in stealth root via in-tree KernelSU-Next and SuSFS 1.5.5 with hardware safe mode.
+- Built-in stealth root via in-tree KernelSU-Next (with boot cmdline feature locking) and SuSFS 1.5.5.
 - Fixes stock Dimensity 1200 schedutil governor overheating and battery drain.
 - Sustains 120 Hz display fluidness without microstutter or thermal throttling.
 - Low-battery brownout protection (PMIC DLPT), PPM v3 A78 power budget fix, and true 4500 mAh battery telemetry.
 - Kernel-level 360 Hz touchscreen polling persistence across screen sleep/wake cycles.
 - Reduces background battery drain during Bluetooth audio playback and isolates system telemetry.
+- Dynamic SELinux hiding (BakaSU) and runtime LSM hook patching for stealth root.
+- Tuned kernel VM defaults (swappiness=100, watermark_scale_factor=150) and noop I/O scheduler for UFS 3.1 hardware queueing.
 - Expands networking, storage, audio, eBPF tracing, and hardware diagnostic capabilities.
+- Hardware diagnostics and debugging: Ramoops crash dumps in reserved RAM, runtime dynamic debugfs control, and USB serial console.
+- Standalone kernel binary: `Image.gz` for AnyKernel3 packages or manual repacking without touching stock boot.img.
 
 **Table of Contents:**
 - [Quick Start & Rollback](#quick-start--rollback)
@@ -59,7 +64,7 @@ Built for stock firmware **`RMX3357_13.1.0.500(CN01)`** (realme UI 4.0 / Android
    ```
 
 #### 2. Install Root & Companion Module
-1. Install [KernelSU-Next Manager APK (v3.4.0)](https://github.com/rifsxd/KernelSU-Next/releases).
+1. Install [KernelSU-Next Manager APK (v3.4.1+)](https://github.com/KernelSU-Next/KernelSU-Next/releases).
 2. Open KernelSU-Next Manager and flash the companion module: **`rmx3357-neocore-companion.zip`** (source files in [`userspace/`](userspace/)).
 3. Reboot to activate userspace optimizations (ColorOS power profile sync, Bluetooth Little-core affinity, MediaTek logger cleanup).
 
@@ -78,9 +83,10 @@ fastboot reboot
 
 ### Stealth & Root (KernelSU-Next + SuSFS 1.5.5)
 
-#### 1. In-Tree KernelSU-Next v3.4.0-legacy (UAPI 4)
+#### 1. In-Tree KernelSU-Next v3.4.1+ (UAPI 5)
 - **Direct Kernel Integration**: Integrated directly into `drivers/kernelsu` (`CONFIG_KSU_MANUAL_HOOK=y`), avoiding unstable dynamic `kprobes` and hook failures.
-- **Scoped Descriptors**: Operates over UAPI v4 scoped file descriptors (`[ksu_driver_su]`), granting root privileges only to processes possessing an authenticated descriptor issued by the manager.
+- **Scoped Descriptors & UAPI v5**: Operates over UAPI v5 scoped file descriptors (`[ksu_driver_su]`) with `EVENT_SERVICES` support, granting root privileges only to processes possessing an authenticated descriptor issued by the manager.
+- **Deferred Throne Tracking & Blacklisting**: Uses `task_work` for deferred manager verification and caches APK directories without lock contention. Supports in-kernel module blacklisting (`kernelsu.block_modules`) and restricts `su` to ADB sessions when enabled.
 
 #### 2. SuSFS 1.5.5 Kernel Stealth Subsystem
 - **Clean VFS Architecture**: Standard VFS code paths without inline path-redirection hacks, preserving POSIX file locking semantics and preventing SQLite database corruption.
@@ -88,10 +94,16 @@ fastboot reboot
 - **EROFS statfs Spoofing**: Helper `zeromount_spoof_statfs` returns stock filesystem metrics (0 free blocks, magic `0xe0f5e1e2`) for read-only partitions (`/system`, `/vendor`, `/product`), concealing root overlays and mount modifications.
 - **Maps, Descriptors & Symbol Cloaking**: Masks module paths in `/proc/[pid]/maps` and strips inotify watch descriptors in `/proc/[pid]/fdinfo/`. `CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS` in `kernel/kallsyms.c` strips `ksu_`, `susfs_`, and `ksud` symbols. `sys_newuname` in `kernel/sys.c` spoofs certified stock release strings for passing Play Integrity checks.
 
-#### 3. Hybrid Mount & NeoZygisk Integration
+#### 3. BakaSU SELinux Hiding & Dynamic LSM Hooks
+- **SELinux Status & Rule Hiding**: In-kernel `selinux_hide` dynamically conceals SELinux status and custom rules from root detection algorithms while preserving standard enforcing checks for unprivileged apps.
+- **Dynamic Symbol Resolver & LSM Hook Patching**: Dynamically resolves unexported symbols in Linux 4.19 and patches LSM security hook function pointers directly in kernel memory (`patch_memory.c`, `lsm_hooks.c`), eliminating reliance on exported `security_hook_heads`.
+- **ADB Root & Manager Authentication**: In-kernel `adb_root` support, manager identity verification via APK certificate checks (`apk_sign.c`), and package observer throne tracking.
+- **Unkillable Daemon & Session Persistence**: Migrates root daemons (`ksud`) and sessions to the `init` process group via `KSU_IOCTL_SET_INIT_PGRP`, protecting background root services from Android `killProcessGroup` termination.
+
+#### 4. Hybrid Mount & NeoZygisk Integration
 - Fully compatible with [Hybrid Mount](https://github.com/Hybrid-Mount/meta-hybrid_mount) (`disable_umount = true`) for clean mount isolation without unmount deadlocks, and [NeoZygisk](https://github.com/JingMatrix/NeoZygisk) as the modern Zygisk provider.
 
-#### 4. Hardware Safe Mode (Vol- x3)
+#### 5. Hardware Safe Mode (Vol- x3)
 - If an installed module triggers a bootloop, press **Volume Down** (`KEY_VOLUMEDOWN`) three times during device startup. The kernel input driver intercepts the keypresses and skips module loading, allowing the system to boot cleanly.
 
 ---
@@ -242,7 +254,7 @@ The companion service (`service.sh`) stops noisy MediaTek debug loggers and Colo
 
 ### Building from Source
 
-- **Toolchain**: AOSP Clang 12.0.5 (`clang-r416183b`), LLD 12.0.5, GNU binutils 2.34 (`aarch64-linux-gnu-`, `arm-linux-gnueabi-`).
+- **Toolchain**: AOSP Clang 12.0.5 (`clang-r416183b`), LLD 12.0.5, GNU binutils 2.34 (`aarch64-linux-gnu-`, `arm-linux-gnueabi-`). Clean build with strict type-safety and signedness fixes in scheduler (`eas_plus.c`), hybridswap (`hybridswap_stats.c`), and sysctl.
 - **Base Defconfig**: `arch/arm64/configs/k6893v1_64_k419_defconfig` (or `k6893v1_64_k419_ab_defconfig` for A/B).
 - **Config Overlay**: `arch/arm64/configs/custom_rmx3357.config`.
 
@@ -271,10 +283,11 @@ make -j$(nproc) Image.gz modules
 
 - [Realme Open Source Kernel Base](https://github.com/realme-kernel-opensource/realme_X7max_GTneo_GTneo2T-AndroidT-kernel-source)
 - [Realme Open Source Vendor Base](https://github.com/realme-kernel-opensource/realme_X7max_GTneo_GTneo2T-AndroidT-vendor-source)
-- [KernelSU-Next](https://github.com/rifsxd/KernelSU-Next) — [@rifsxd](https://github.com/rifsxd)
-- [SuSFS](https://gitlab.com/simonpunk/susfs4ksu) — [@simonpunk](https://gitlab.com/simonpunk) & [@sidex102](https://github.com/sidex102)
-- [Hybrid Mount](https://github.com/Hybrid-Mount/meta-hybrid_mount) — [Hybrid-Mount](https://github.com/Hybrid-Mount)
-- [NeoZygisk](https://github.com/JingMatrix/NeoZygisk) — [@JingMatrix](https://github.com/JingMatrix)
+- [KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next)
+- [BakaSU](https://github.com/Baka-SU/BakaSU)
+- [SuSFS](https://gitlab.com/simonpunk/susfs4ksu)
+- [Hybrid Mount](https://github.com/Hybrid-Mount/meta-hybrid_mount)
+- [NeoZygisk](https://github.com/JingMatrix/NeoZygisk)
 
 ---
 
@@ -282,16 +295,20 @@ make -j$(nproc) Image.gz modules
 ## Русский
 
 Кастомное ядро Linux 4.19.191 для **Realme GT Neo 2T** (`RMX3357` / `RE5469`) на процессоре **MediaTek Dimensity 1200 5G** (`MT6893`).  
-Собрано под официальную прошивку **`RMX3357_13.1.0.500(CN01)`** (realme UI 4.0 / Android 13). Версия: **v2026.10.04**.
+Собрано под официальную прошивку **`RMX3357_13.1.0.500(CN01)`** (realme UI 4.0 / Android 13). Версия: **v2026.10.13**.
 
 **Основные особенности:**
-- Встроенный скрытый Root через KernelSU-Next и SuSFS 1.5.5 с аппаратным безопасным режимом.
+- Встроенный скрытый Root через KernelSU-Next (с аппаратной блокировкой фич в cmdline) и SuSFS 1.5.5.
 - Убирает перегрев и жор батареи от стокового schedutil на Dimensity 1200.
 - Держит стабильные 120 Гц без микростаттеров и троттлинга.
 - Аппаратная защита от внезапных отключений (PMIC DLPT) при низком заряде и честная ёмкость 4500 мА·ч с телеметрией SOH.
 - Сохранение частоты опроса тача 360 Гц при разблокировке прямо в драйвере ядра.
 - Экономит заряд при прослушивании звука по Bluetooth и режет мусорную телеметрию MediaTek.
+- Динамическое сокрытие SELinux (BakaSU) и runtime-патчинг LSM-хуков в обход отсутствующего экспорта security_hook_heads.
+- Тюнинг виртуальной памяти в ядре (swappiness=100, watermark_scale_factor=150) и планировщик noop под аппаратные очереди UFS 3.1.
 - Дополнительные сетевые, звуковые и диагностические возможности (WireGuard, BBR, CDC NCM, Bitperfect, SocketCAN, SDR, eBPF).
+- Диагностика и отладка: дампы паники в ОЗУ (Ramoops), динамический debugfs и консоль ядра через USB serial.
+- Чистый бинарник ядра: `Image.gz` для установки через AnyKernel3 или ручной перепаковки без распаковки boot.img.
 
 **Содержание:**
 - [Быстрая установка и возврат на сток](#быстрая-установка-и-возврат-на-сток)
@@ -328,7 +345,7 @@ make -j$(nproc) Image.gz modules
    ```
 
 #### 2. Установка Root и модуля-компаньона
-1. Установите [KernelSU-Next Manager APK (v3.4.0)](https://github.com/rifsxd/KernelSU-Next/releases).
+1. Установите [KernelSU-Next Manager APK (v3.4.1+)](https://github.com/KernelSU-Next/KernelSU-Next/releases).
 2. Откройте KernelSU-Next Manager и прошейте архив модуля: **`rmx3357-neocore-companion.zip`** (исходники в каталоге [`userspace/`](userspace/)).
 3. Перезагрузите смартфон. Модуль автоматически подхватит синхронизацию профилей ColorOS, перенесёт Bluetooth на малые ядра и отключит спам логгеров MediaTek.
 
@@ -347,9 +364,10 @@ fastboot reboot
 
 ### Скрытие и Root (KernelSU-Next + SuSFS 1.5.5)
 
-#### 1. Встроенный KernelSU-Next v3.4.0-legacy (UAPI 4)
+#### 1. Встроенный KernelSU-Next v3.4.1+ (UAPI 5)
 - **Прямая интеграция в ядро**: Драйвер встроен непосредственно в исходный код ядра (`drivers/kernelsu`, `CONFIG_KSU_MANUAL_HOOK=y`), что исключает накладные расходы и сбои механизма динамических `kprobes`.
-- **Изолированные дескрипторы UAPI v4**: Работает через защищённый протокол с файловыми дескрипторами `[ksu_driver_su]`, где root-доступ предоставляется только процессам с аутентифицированным дескриптором от менеджера.
+- **Изолированные дескрипторы и UAPI v5**: Работает через защищённый протокол с файловыми дескрипторами `[ksu_driver_su]` с поддержкой `EVENT_SERVICES`, где root-доступ предоставляется только процессам с аутентифицированным дескриптором от менеджера.
+- **Отложенная верификация через task_work и чёрный список**: Использует `task_work` для отложенной проверки менеджера без блокировок и кэширует пути каталогов APK. Поддерживает блокировку модулей на уровне ядра (`kernelsu.block_modules`) и ограничение `su` только сессиями ADB.
 
 #### 2. Скрытная подсистема SuSFS 1.5.5 на уровне VFS
 - **Чистая архитектура VFS**: Стандартные пути VFS без грубых перенаправлений путей «на лету», что сохраняет блокировки POSIX и исключает повреждение баз данных SQLite.
@@ -357,10 +375,16 @@ fastboot reboot
 - **Подмена statfs для EROFS**: Функция `zeromount_spoof_statfs` отдаёт заводскую статистику файловой системы (0 свободных блоков, сигнатура EROFS `0xe0f5e1e2`) для системных разделов (`/system`, `/vendor`, `/product`), скрывая модификации и оверлеи.
 - **Маскировка памяти, дескрипторов и символов**: Подменяются пути модулей в `/proc/[pid]/maps`, срезаются дескрипторы inotify в `/proc/[pid]/fdinfo/`. Параметр `CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS` в `kernel/kallsyms.c` скрывает системные символы с префиксами `ksu_`, `susfs_` и `ksud`. Вызов `sys_newuname` в `kernel/sys.c` подменяет строки релиза под заводскую сертифицированную прошивку для успешного прохождения проверок Play Integrity.
 
-#### 3. Интеграция с Hybrid Mount и NeoZygisk
+#### 3. Сокрытие SELinux и динамические LSM-хуки (BakaSU)
+- **Скрытие статуса и правил SELinux**: Модуль `selinux_hide` в ядре динамически скрывает статус и добавленные правила SELinux от проверок рут-детекта, сохраняя режим enforcing для обычных приложений.
+- **Динамический резолвер символов и патчинг LSM-хуков**: Резолвит неэкспортированные символы в ядре 4.19 и патчит указатели хуков LSM напрямую в памяти ядра (`patch_memory.c`, `lsm_hooks.c`), обходя ограничение на закрытый `security_hook_heads`.
+- **ADB Root и аутентификация менеджера**: Встроена поддержка `adb_root`, проверка подписи APK менеджера по сертификату (`apk_sign.c`) и отслеживание пакетов (throne tracker).
+- **Неубиваемый демон и сохранение сессий**: Перенос демона root (`ksud`) и его сессий в группу процессов `init` через суперколл `KSU_IOCTL_SET_INIT_PGRP` исключает принудительное завершение фоновых служб Android-механизмом `killProcessGroup`.
+
+#### 4. Интеграция с Hybrid Mount и NeoZygisk
 - Полная совместимость со связкой [Hybrid Mount](https://github.com/Hybrid-Mount/meta-hybrid_mount) (`disable_umount = true`) для надёжной изоляции точек монтирования без взаимных блокировок и современным Zygisk-провайдером [NeoZygisk](https://github.com/JingMatrix/NeoZygisk).
 
-#### 4. Аппаратный безопасный режим (Safe Mode)
+#### 5. Аппаратный безопасный режим (Safe Mode)
 - Если установленный модуль приводит к бутлупу, нажмите клавишу уменьшения громкости (`KEY_VOLUMEDOWN` / `Vol-`) три раза подряд при включении смартфона. Драйвер ввода `drivers/input/input.c` перехватит эту комбинацию и пропустит загрузку модулей, дав системе нормально запуститься.
 
 ---
@@ -511,7 +535,7 @@ fastboot reboot
 
 ### Сборка из исходников
 
-- **Инструменты сборки**: AOSP Clang 12.0.5 (`clang-r416183b`), LLD 12.0.5, GNU binutils 2.34 (`aarch64-linux-gnu-`, `arm-linux-gnueabi-`).
+- **Инструменты сборки**: AOSP Clang 12.0.5 (`clang-r416183b`), LLD 12.0.5, GNU binutils 2.34 (`aarch64-linux-gnu-`, `arm-linux-gnueabi-`). Чистая сборка с исправлением предупреждений типизации и знаковости в `eas_plus.c`, `hybridswap_stats.c` и `sysctl.c`.
 - **Базовый дефконфиг**: `arch/arm64/configs/k6893v1_64_k419_defconfig` (или `k6893v1_64_k419_ab_defconfig` для A/B).
 - **Пользовательский оверлей**: `arch/arm64/configs/custom_rmx3357.config`.
 
@@ -540,7 +564,8 @@ make -j$(nproc) Image.gz modules
 
 - [Realme Open Source Kernel Base](https://github.com/realme-kernel-opensource/realme_X7max_GTneo_GTneo2T-AndroidT-kernel-source)
 - [Realme Open Source Vendor Base](https://github.com/realme-kernel-opensource/realme_X7max_GTneo_GTneo2T-AndroidT-vendor-source)
-- [KernelSU-Next](https://github.com/rifsxd/KernelSU-Next) — [@rifsxd](https://github.com/rifsxd)
-- [SuSFS](https://gitlab.com/simonpunk/susfs4ksu) — [@simonpunk](https://gitlab.com/simonpunk) & [@sidex102](https://github.com/sidex102)
-- [Hybrid Mount](https://github.com/Hybrid-Mount/meta-hybrid_mount) — [Hybrid-Mount](https://github.com/Hybrid-Mount)
-- [NeoZygisk](https://github.com/JingMatrix/NeoZygisk) — [@JingMatrix](https://github.com/JingMatrix)
+- [KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next)
+- [BakaSU](https://github.com/Baka-SU/BakaSU)
+- [SuSFS](https://gitlab.com/simonpunk/susfs4ksu)
+- [Hybrid Mount](https://github.com/Hybrid-Mount/meta-hybrid_mount)
+- [NeoZygisk](https://github.com/JingMatrix/NeoZygisk)
