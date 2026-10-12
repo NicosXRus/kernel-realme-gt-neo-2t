@@ -18,6 +18,7 @@
 #include "manager_identity.h"
 #include "throne_tracker.h"
 #include "compat/kernel_compat.h"
+#include "util.h"
 
 uid_t ksu_manager_appid = KSU_INVALID_APPID;
 
@@ -25,6 +26,10 @@ bool ksu_is_manager(void)
 {
 	return is_manager();
 }
+
+#define DATA_PATH_LEN 384 // 384 is enough for /data/app/<package>/base.apk
+
+static char cached_manager_apk_path[DATA_PATH_LEN];
 
 #define SYSTEM_PACKAGES_LIST_PATH "/data/system/packages.list"
 
@@ -36,37 +41,42 @@ struct uid_data {
 
 static void crown_manager(const char *apk, struct list_head *uid_data)
 {
-	char pkg[KSU_MAX_PACKAGE_NAME];
-	if (get_pkg_from_apk_path(pkg, apk) < 0) {
-		pr_err("Failed to get package name from apk path: %s\n", apk);
-		return;
-	}
-
-	pr_info("manager pkg: %s\n", pkg);
-
 	struct list_head *list = (struct list_head *)uid_data;
 	struct uid_data *np;
+	const char *target_pkg;
+
+#ifdef KSU_MANAGER_PACKAGE
+	target_pkg = KSU_MANAGER_PACKAGE;
+#else
+	char pkg[KSU_MAX_PACKAGE_NAME];
+	char dir_path[DATA_PATH_LEN];
+	char *last_slash;
+
+	strscpy(dir_path, apk, sizeof(dir_path));
+	last_slash = strrchr(dir_path, '/');
+	if (last_slash)
+		*last_slash = '\0'; // strip /base.apk
+
+	if (get_pkg_from_apk_dir_path(pkg, dir_path) < 0) {
+		pr_err("Failed to get package name from apk dir path: %s\n", dir_path);
+		return;
+	}
+	pr_info("manager pkg: %s\n", pkg);
+	target_pkg = pkg;
+#endif
 
 	list_for_each_entry (np, list, list) {
-		if (strncmp(np->package, pkg, KSU_MAX_PACKAGE_NAME) == 0) {
-			pr_info("Crowning manager: %s(uid=%d)\n", pkg, np->uid);
+		if (strncmp(np->package, target_pkg, KSU_MAX_PACKAGE_NAME) == 0) {
+			pr_info("Crowning manager: %s(uid=%d)\n", target_pkg, np->uid);
 			ksu_set_manager_appid(np->uid);
 			break;
 		}
 	}
 }
 
-#define DATA_PATH_LEN 384 // 384 is enough for /data/app/<package>/base.apk
-
 struct data_path {
 	char dirpath[DATA_PATH_LEN];
 	int depth;
-	struct list_head list;
-};
-
-struct apk_path_hash {
-	unsigned int hash;
-	bool exists;
 	struct list_head list;
 };
 
@@ -76,7 +86,6 @@ struct my_dir_context {
 	char *parent_dir;
 	void *private_data;
 	int depth;
-	int *stop;
 };
 // https://docs.kernel.org/filesystems/porting.html
 // filldir_t (readdir callbacks) calling conventions have changed. Instead of returning 0 or -E... it returns bool now. false means "no more" (as -E... used to) and true - "keep going" (as 0 in old calling conventions). Rationale: callers never looked at specific -E... values anyway. -> iterate_shared() instances require no changes at all, all filldir_t ones in the tree converted.
@@ -89,6 +98,24 @@ struct my_dir_context {
 #define FILLDIR_ACTOR_CONTINUE 0
 #define FILLDIR_ACTOR_STOP -EINVAL
 #endif
+
+static bool maybe_manager_apk_dir(const char *path)
+{
+#ifdef KSU_MANAGER_PACKAGE
+	_Static_assert(sizeof(KSU_MANAGER_PACKAGE) < KSU_MAX_PACKAGE_NAME, "KSU_MANAGER_PACKAGE too long!");
+	char pkg[KSU_MAX_PACKAGE_NAME];
+	if (get_pkg_from_apk_dir_path(pkg, path) < 0) {
+		pr_err("Failed to get package name from apk dir path: %s\n", path);
+		return false;
+	}
+
+	// pkg is `<real package>`
+	return strncmp(pkg, KSU_MANAGER_PACKAGE, sizeof(KSU_MANAGER_PACKAGE)) == 0;
+#else
+	return true;
+#endif
+}
+
 extern bool is_manager_apk(char *path);
 FILLDIR_RETURN_TYPE my_actor(struct dir_context *ctx, const char *name,
 							int namelen, loff_t off, u64 ino,
@@ -104,10 +131,6 @@ FILLDIR_RETURN_TYPE my_actor(struct dir_context *ctx, const char *name,
 
 	if (!my_ctx) {
 		pr_err("Invalid context\n");
-		return FILLDIR_ACTOR_STOP;
-	}
-	if (my_ctx->stop && *my_ctx->stop) {
-		pr_info("Stop searching\n");
 		return FILLDIR_ACTOR_STOP;
 	}
 
@@ -126,8 +149,7 @@ FILLDIR_RETURN_TYPE my_actor(struct dir_context *ctx, const char *name,
 		return FILLDIR_ACTOR_CONTINUE;
 	}
 
-	if ((d_type == DT_DIR || d_type == DT_UNKNOWN) && my_ctx->depth > 0 &&
-		(my_ctx->stop && !*my_ctx->stop)) {
+	if ((d_type == DT_DIR || d_type == DT_UNKNOWN) && my_ctx->depth > 0) {
 		struct data_path *data = kzalloc(sizeof(struct data_path), GFP_KERNEL);
 
 		if (!data) {
@@ -143,8 +165,13 @@ FILLDIR_RETURN_TYPE my_actor(struct dir_context *ctx, const char *name,
 	}
 
 	// now put this on candidate_path
-	if (d_type == DT_REG && !strncmp(name, "base.apk", 8)) {
-		snprintf(candidate_path, DATA_PATH_LEN, "%s/%.*s", my_ctx->parent_dir, namelen, name);
+	if (d_type == DT_REG && namelen == 8 && !memcmp(name, "base.apk", 8)) {
+		if (maybe_manager_apk_dir(my_ctx->parent_dir)) {
+			snprintf(candidate_path, DATA_PATH_LEN, "%s/%.*s", my_ctx->parent_dir, namelen, name);
+			strcpy(cached_manager_apk_path, candidate_path);
+		}
+		// As soon as we met the base.apk, we can stop
+		return FILLDIR_ACTOR_STOP;
 	}
 
 	return FILLDIR_ACTOR_CONTINUE;
@@ -156,6 +183,8 @@ void search_manager(const char *path, int depth, struct list_head *uid_data)
 	struct list_head data_path_list;
 	INIT_LIST_HEAD(&data_path_list);
 
+	unsigned long data_app_magic = 0;
+
 	// First depth
 	struct data_path data;
 	strscpy(data.dirpath, path, DATA_PATH_LEN);
@@ -164,50 +193,59 @@ void search_manager(const char *path, int depth, struct list_head *uid_data)
 
 	// we put the apk path we collected here
 	char candidate_path[DATA_PATH_LEN];
+	candidate_path[0] = 0;
 
 	for (i = depth; i >= 0; i--) {
 		struct data_path *pos, *n;
 
 		list_for_each_entry_safe (pos, n, &data_path_list, list) {
+			if (stop)
+				goto skip_iterate;
 			struct my_dir_context ctx = { .ctx.actor = my_actor,
 										.data_path_list = &data_path_list,
 										.parent_dir = pos->dirpath,
 										.private_data = candidate_path,
-										.depth = pos->depth,
-										.stop = &stop };
+										.depth = pos->depth };
+			struct file *file = ksu_filp_open_nonotify(pos->dirpath, O_RDONLY | O_NOFOLLOW | O_NOATIME | O_DIRECTORY);
+			if (IS_ERR(file)) {
+				pr_err("Failed to open directory: %s, err: %ld\n", pos->dirpath, PTR_ERR(file));
+				goto skip_iterate;
+			}
 
-			// make sure to clean buffer on every iteration
-			memset(candidate_path, 0, DATA_PATH_LEN);
-
-			struct file *file;
-
-			if (!stop) {
-				file = ksu_filp_open_compat(pos->dirpath, O_RDONLY | O_NOFOLLOW, 0);
-				if (IS_ERR(file)) {
-					pr_err("Failed to open directory: %s, err: %ld\n",
-						pos->dirpath, PTR_ERR(file));
+			// grab magic on first folder, which is /data/app
+			if (!data_app_magic) {
+				if (file->f_inode->i_sb->s_magic) {
+					data_app_magic = file->f_inode->i_sb->s_magic;
+					pr_info("%s: dir: %s got magic! 0x%lx\n", __func__, pos->dirpath, data_app_magic);
+				} else {
+					filp_close(file, NULL);
 					goto skip_iterate;
 				}
-
-				iterate_dir(file, &ctx.ctx);
-				filp_close(file, NULL);
-
-				// ^ oh so thats the issue!
-				// we were calling is_manager_apk inside iterate_dir
-				// now we defer file opens after iterate_dir
-				// this way we dont open apks while inside that
-				if (!strstarts(candidate_path, "/data/ap") )
-					goto skip_iterate;
-
-				bool is_manager = is_manager_apk(candidate_path);
-				pr_info("Found new base.apk at path: %s, is_manager: %d\n", candidate_path, is_manager);
-
-				if (likely(!is_manager))
-					goto skip_iterate;
-
-				crown_manager(candidate_path, uid_data);
-				stop = 1;
 			}
+
+			if (file->f_inode->i_sb->s_magic != data_app_magic) {
+				pr_info("%s: skip: %s magic: 0x%lx expected: 0x%lx\n", __func__, pos->dirpath,
+					file->f_inode->i_sb->s_magic, data_app_magic);
+				filp_close(file, NULL);
+				goto skip_iterate;
+			}
+
+			candidate_path[0] = 0;
+			iterate_dir(file, &ctx.ctx);
+			filp_close(file, NULL);
+
+			if (!candidate_path[0])
+				goto skip_iterate;
+
+			bool is_manager = is_manager_apk(candidate_path);
+			pr_info("Found manager base.apk at path: %s, is_manager: %d\n", candidate_path, is_manager);
+
+			if (unlikely(!is_manager))
+				goto skip_iterate;
+
+			stop = 1;
+			crown_manager(candidate_path, uid_data);
+
 		skip_iterate:
 			list_del(&pos->list);
 			if (pos != &data)
@@ -292,9 +330,11 @@ static bool do_track_throne_core(bool prune_only)
 		if (chr != '\n')
 			continue;
 
-		memset(buf, 0, sizeof(buf));
 		count = ksu_kernel_read_compat(fp, buf, sizeof(buf) - 1, &line_start);
-		buf[sizeof(buf) - 1] = '\0';
+		if (count <= 0) {
+			break;
+		}
+		buf[count] = '\0';
 
 		struct uid_data *data = kzalloc(sizeof(struct uid_data), GFP_KERNEL);
 		if (!data) {
@@ -319,8 +359,7 @@ static bool do_track_throne_core(bool prune_only)
 			break;
 		}
 		data->uid = res;
-		memcpy(data->package, package, KSU_MAX_PACKAGE_NAME - 1);
-		data->package[KSU_MAX_PACKAGE_NAME - 1] = '\0';
+		strscpy(data->package, package, sizeof(data->package));
 		list_add_tail(&data->list, &uid_list);
 		// reset line start
 		line_start = pos;
@@ -335,21 +374,67 @@ static bool do_track_throne_core(bool prune_only)
 		goto prune;
 
 	// first, check if manager_uid exist!
-	bool manager_exist = false;
+	uid_t manager_package_uid = KSU_INVALID_APPID;
+	bool need_rescan = false;
 	list_for_each_entry (np, &uid_list, list) {
-		if (np->uid == ksu_get_manager_appid()) {
-			manager_exist = true;
+#ifdef KSU_MANAGER_PACKAGE
+		if (strcmp(np->package, KSU_MANAGER_PACKAGE) == 0) {
+			manager_package_uid = np->uid;
 			break;
 		}
+#else
+		if (np->uid == ksu_get_manager_appid()) {
+			manager_package_uid = np->uid;
+			break;
+		}
+#endif
 	}
 
-	if (!manager_exist) {
+	if (manager_package_uid == KSU_INVALID_APPID) {
+		cached_manager_apk_path[0] = 0;
 		if (ksu_is_manager_appid_valid()) {
 			pr_info("manager is uninstalled, invalidate it!\n");
 			ksu_invalidate_manager_uid();
 			goto prune;
 		}
+#ifndef KSU_MANAGER_PACKAGE
+		// Unpinned: package name unknown; rescan to find it
+		need_rescan = true;
+#endif
+	} else {
+		if (!ksu_is_manager_appid_valid()) {
+			need_rescan = true;
+		} else if (unlikely(np->uid != ksu_get_manager_appid())) {
+			// this should not happen in normal android system
+			pr_info("manager uid changed, invalidate it!\n");
+			cached_manager_apk_path[0] = 0;
+			ksu_invalidate_manager_uid();
+			need_rescan = true;
+		} else {
+			// uid unchanged, skip
+			pr_info("manager uid unchanged, skip search!\n");
+		}
+	}
+
+	if (need_rescan) {
+		// If the apk path still exists, the verification result won't be changed
+		if (cached_manager_apk_path[0]) {
+			struct path p;
+			int ret = kern_path(cached_manager_apk_path, 0, &p);
+			if (ret == 0) {
+				// skip search
+				pr_info("manager apk path unchanged, skip search!\n");
+				path_put(&p);
+				goto prune;
+			} else if (ret != -ENOENT) {
+				pr_err("stat cached manager path failed: %d (path=%s)\n", ret, cached_manager_apk_path);
+			}
+		}
+#ifdef KSU_MANAGER_PACKAGE
+		pr_info("Searching manager " KSU_MANAGER_PACKAGE "...\n");
+#else
 		pr_info("Searching manager...\n");
+#endif
 		search_manager("/data/app", 2, &uid_list);
 		pr_info("Search manager finished\n");
 	}

@@ -297,6 +297,8 @@ void apply_kernelsu_rules()
 
 	apply_kernelsu_rules_fn((void *)db);
 
+	// Return value ignored: the policy is published either way.
+	ksu_policydb_fixup_len(db, "apply_kernelsu_rules");
 	rcu_assign_pointer(selinux_state.policy, pol);
 	synchronize_rcu();
 	ksu_destroy_sepolicy(old_pol);
@@ -717,6 +719,8 @@ int handle_sepolicy(void __user *user_data, u64 data_len)
 		cmd_index++;
 	}
 
+	// Return value ignored: the policy is published either way.
+	ksu_policydb_fixup_len(db, "handle_sepolicy");
 	rcu_assign_pointer(selinux_state.policy, pol);
 	synchronize_rcu();
 	ksu_destroy_sepolicy(old_pol);

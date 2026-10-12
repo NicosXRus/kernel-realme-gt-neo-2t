@@ -5,7 +5,11 @@
 
 #include "ss/policydb.h"
 
-// Operation on types
+struct selinux_policy *ksu_dup_sepolicy(struct selinux_policy *old_pol);
+
+int ksu_policydb_fixup_len(struct policydb *db, const char *tag);
+
+void ksu_destroy_sepolicy(struct selinux_policy *orig);
 bool ksu_type(struct policydb *db, const char *name, const char *attr);
 bool ksu_attribute(struct policydb *db, const char *name);
 bool ksu_permissive(struct policydb *db, const char *type);
