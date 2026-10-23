@@ -7,6 +7,18 @@
 <a name="english"></a>
 ## English
 
+### [v2026.10.23] - 2026-10-23
+
+#### In-Tree KernelSU-Next v3.4.2-dev (dev b427a3f9, UAPI 6, build 33605)
+- Sync in-tree driver with upstream dev (`b427a3f9`) and PR #1657: bump to UAPI v6 and default manager package to `com.rifsxd.ksunext`.
+- Add `KSU_IOCTL_LOOKUP_SYMBOLS` ioctl (#22) and batch in-kernel `kallsyms` lookup (`ksu_lookup_kernel_symbols`) with binary search.
+- Fix bind-mounted `init.rc` detection in `is_init_rc()` by checking canonical path via `d_path()` instead of `dentry->d_name.name`.
+- Prevent `fsnotify` mark release UAF in `pkg_observer` with `.free_mark = ksu_free_mark` and `fsnotify_wait_marks_destroyed()`.
+- Route `su_mount_ns` namespace switches (`setns`, `unshare`) through unified `ksyscall` helper.
+- Pull in module `preinit` runner with `KSU_NO_PREINIT` stubs for non-GKI trees without installed UAPI headers.
+- Return `false` on `kern_path()` error in `throne_tracker` so retry counter does not burn out before `/data` mounts.
+- Keep ARM64 16-byte stack alignment with 256-byte gap in `userspace_stack_buffer()`.
+
 ### [v2026.10.13] - 2026-10-13
 
 #### 1. In-Tree KernelSU-Next v3.4.1+ (dev 0a77550c, UAPI 5, build 33333)
@@ -131,6 +143,18 @@
 
 <a name="русский"></a>
 ## Русский
+
+### [v2026.10.23] - 23.10.2026
+
+#### Обновление KernelSU-Next до v3.4.2-dev (dev b427a3f9, UAPI 6, сборка 33605)
+- Синхронизация с веткой dev (`b427a3f9`) и PR #1657: переход на протокол UAPI v6, пакет менеджера по умолчанию `com.rifsxd.ksunext`.
+- Добавлен суперколл `KSU_IOCTL_LOOKUP_SYMBOLS` (#22) и пакетный резолвер символов ядра (`ksu_lookup_kernel_symbols`) через бинарный поиск по `kallsyms`.
+- Исправлено определение bind-mount `init.rc` в `is_init_rc()`: полный путь проверяется через `d_path()` вместо короткого имени dentry.
+- Устранён UAF при сбросе меток `fsnotify` в `pkg_observer`: добавлен коллбэк `.free_mark = ksu_free_mark` и барьер `fsnotify_wait_marks_destroyed()`.
+- Переключение пространств имён в `su_mount_ns` (`setns`, `unshare`) переведено на общий макрос `ksyscall`.
+- Добавлен ранний раннер `preinit` со сборкой под заглушки `KSU_NO_PREINIT`, если в дереве нет готовых заголовков UAPI.
+- В `throne_tracker` возвращаем `false` при ошибке `kern_path()`, чтобы счётчик попыток не сгорал до монтирования `/data`.
+- Сохранено 16-байтовое выравнивание стека ARM64 с запасом 256 байт в `userspace_stack_buffer()`.
 
 ### [v2026.10.13] - 13.10.2026
 
