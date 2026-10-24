@@ -2,7 +2,7 @@
 
 [![Kernel Version](https://img.shields.io/badge/Linux-4.19.191-blue.svg)](https://kernel.org/)
 [![Device](https://img.shields.io/badge/Device-Realme%20GT%20Neo%202T%20(RMX3357)-brightgreen.svg)](https://github.com/realme-kernel-opensource/realme_X7max_GTneo_GTneo2T-AndroidT-kernel-source)
-[![KernelSU-Next](https://img.shields.io/badge/KernelSU--Next-v3.4.2-success.svg)](https://github.com/KernelSU-Next/KernelSU-Next)
+[![KernelSU-Next](https://img.shields.io/badge/KernelSU--Next-v3.4.2--dev-success.svg)](https://github.com/KernelSU-Next/KernelSU-Next)
 [![BakaSU](https://img.shields.io/badge/BakaSU-Integrated-orange.svg)](https://github.com/Baka-SU/BakaSU)
 [![SuSFS](https://img.shields.io/badge/SuSFS-v1.5.5-blueviolet.svg)](https://gitlab.com/simonpunk/susfs4ksu)
 
@@ -83,10 +83,10 @@ fastboot reboot
 
 ### Stealth & Root (KernelSU-Next + SuSFS 1.5.5)
 
-#### 1. In-Tree KernelSU-Next v3.4.2 (UAPI 5)
+#### 1. In-Tree KernelSU-Next v3.4.2-dev (UAPI 6, build 33605)
 - **Direct Kernel Integration**: Integrated directly into `drivers/kernelsu` (`CONFIG_KSU_MANUAL_HOOK=y`), avoiding unstable dynamic `kprobes` and hook failures.
-- **Scoped Descriptors & UAPI v5**: Operates over UAPI v5 scoped file descriptors (`[ksu_driver_su]`) with `EVENT_SERVICES` support, granting root privileges only to processes possessing an authenticated descriptor issued by the manager.
-- **Deferred Throne Tracking & Blacklisting**: Uses `task_work` for deferred manager verification and caches APK directories without lock contention. Supports in-kernel module blacklisting (`kernelsu.block_modules`) and restricts `su` to ADB sessions when enabled.
+- **Scoped Descriptors & UAPI v6**: Operates over UAPI v6 scoped file descriptors (`[ksu_driver_su]`) with batch symbol resolution (`KSU_IOCTL_LOOKUP_SYMBOLS`) and `EVENT_SERVICES` support, granting root privileges only to processes possessing an authenticated descriptor.
+- **VFS & Inode Lifecycle**: Fast-paths `init.rc` checks before canonical path resolution (`d_path()`). Drains fsnotify marks via `fsnotify_wait_marks_destroyed()` and uses non-blocking retry logic in `throne_tracker`. Supports in-kernel module blacklisting (`kernelsu.block_modules`) and restricts `su` to ADB sessions when enabled.
 
 #### 2. SuSFS 1.5.5 Kernel Stealth Subsystem
 - **Clean VFS Architecture**: Standard VFS code paths without inline path-redirection hacks, preserving POSIX file locking semantics and preventing SQLite database corruption.
@@ -364,10 +364,10 @@ fastboot reboot
 
 ### Скрытие и Root (KernelSU-Next + SuSFS 1.5.5)
 
-#### 1. Встроенный KernelSU-Next v3.4.2 (UAPI 5)
-- **Прямая интеграция в ядро**: Драйвер встроен непосредственно в исходный код ядра (`drivers/kernelsu`, `CONFIG_KSU_MANUAL_HOOK=y`), что исключает накладные расходы и сбои механизма динамических `kprobes`.
-- **Изолированные дескрипторы и UAPI v5**: Работает через защищённый протокол с файловыми дескрипторами `[ksu_driver_su]` с поддержкой `EVENT_SERVICES`, где root-доступ предоставляется только процессам с аутентифицированным дескриптором от менеджера.
-- **Отложенная верификация через task_work и чёрный список**: Использует `task_work` для отложенной проверки менеджера без блокировок и кэширует пути каталогов APK. Поддерживает блокировку модулей на уровне ядра (`kernelsu.block_modules`) и ограничение `su` только сессиями ADB.
+#### 1. Встроенный KernelSU-Next v3.4.2-dev (UAPI 6, сборка 33605)
+- **Прямая интеграция в ядро**: Драйвер встроен непосредственно в исходный код ядра (`drivers/kernelsu`, `CONFIG_KSU_MANUAL_HOOK=y`), исключая сбои динамических `kprobes`.
+- **Изолированные дескрипторы и UAPI v6**: Работает через дескрипторы `[ksu_driver_su]` с пакетным поиском символов ядра (`KSU_IOCTL_LOOKUP_SYMBOLS`) и `EVENT_SERVICES`. Root выдаётся только процессам с аутентифицированным дескриптором.
+- **Интеграция с VFS и fsnotify**: Быстрый фильтр `init.rc` перед канонической проверкой пути `d_path()`. Очищает метки fsnotify с синхронизацией очереди ядра (`fsnotify_wait_marks_destroyed()`) и опрашивает `/data` в `throne_tracker` без ложных отказов. Поддерживает чёрный список модулей (`kernelsu.block_modules`) и ограничение `su` только сессиями ADB.
 
 #### 2. Скрытная подсистема SuSFS 1.5.5 на уровне VFS
 - **Чистая архитектура VFS**: Стандартные пути VFS без грубых перенаправлений путей «на лету», что сохраняет блокировки POSIX и исключает повреждение баз данных SQLite.
