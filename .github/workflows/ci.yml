@@ -145,6 +145,11 @@ jobs:
           echo "::group::Setting up Vendor Tree and Symlinks"
           mv vendor_repo/vendor ../vendor
           rm -rf vendor_repo
+          rm -f kernel/sched_assist
+          rm -f kernel/locking/klockopt
+
+          ln -s ../../vendor/oplus/kernel/oplus_performance/sched_assist kernel/sched_assist
+          ln -s ../../../vendor/oplus/kernel/oplus_performance/klockopt kernel/locking/klockopt
           ln -sfn "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/../kernel-4.19"
           ln -sfn "$GITHUB_WORKSPACE/drivers" "$GITHUB_WORKSPACE/../drivers"
           PATCH_DIR="$GITHUB_WORKSPACE/scripts/build/patches"
