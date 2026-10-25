@@ -145,24 +145,23 @@ jobs:
           echo "::group::Setting up Vendor Tree and Symlinks"
           mv vendor_repo/vendor ../vendor
           rm -rf vendor_repo
-          rm -f kernel/sched_assist
-          rm -f kernel/locking/klockopt
-
-          ln -s ../../vendor/oplus/kernel/oplus_performance/sched_assist kernel/sched_assist
-          ln -s ../../../vendor/oplus/kernel/oplus_performance/klockopt kernel/locking/klockopt
-          ln -sfn "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/../kernel-4.19"
-          ln -sfn "$GITHUB_WORKSPACE/drivers" "$GITHUB_WORKSPACE/../drivers"
-          PATCH_DIR="$GITHUB_WORKSPACE/scripts/build/patches"
-          if [ -d "$PATCH_DIR" ]; then
-            for patch in "$PATCH_DIR"/*.patch; do
-              [ -e "$patch" ] || continue
-              echo "Applying vendor patch: $(basename "$patch")"
-              patch -d ../vendor -p1 --forward --batch < "$patch"
-            done
+          echo "=== SECUREGUARD CHECK ==="
+          if [ -d "../vendor/oplus/kernel/secureguard" ]; then
+          echo "secureguard directory EXISTS"
+          find ../vendor/oplus/kernel/secureguard -maxdepth 3 -type f -print | sort
+          else
+            echo "secureguard directory DOES NOT EXIST"
           fi
-          ls -la ../vendor
-          ls -ld ../kernel-4.19
-          echo "::endgroup::"
+
+          echo "=== ROOTGUARD CHECK ==="
+          find ../vendor -type d -name "rootguard" -print
+          find ../vendor -type f -name "Kconfig" | grep -i rootguard || true
+
+          echo "=== KEVENTUPLOAD CHECK ==="
+          find ../vendor -type d -name "keventupload" -print
+
+          echo "=== OPLUS KERNEL TREE ==="
+          find ../vendor/oplus/kernel -maxdepth 2 -type d -print | sort | head -300
 
       - name: Install Build Dependencies
         run: |
