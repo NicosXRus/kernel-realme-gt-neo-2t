@@ -1,0 +1,33 @@
+name: ShellCheck
+
+on:
+  push:
+    branches:
+      - 'main'
+      - 'master'
+      - 'dev'
+    paths:
+      - '.github/workflows/shellcheck.yml'
+      - '**/*.sh'
+  pull_request:
+    branches:
+      - 'main'
+      - 'master'
+      - 'dev'
+    paths:
+      - '.github/workflows/shellcheck.yml'
+      - '**/*.sh'
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          ignore_names: gradlew
+          # installer.sh and the vendored Sui tree keep upstream content byte for
+          # byte; their scripts run on the device, not in CI.
+          ignore_paths: ./userspace/ksud/src/installer.sh ./.github/scripts/setup-rust-build.sh userspace/sui

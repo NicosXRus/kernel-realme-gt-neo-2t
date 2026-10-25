@@ -1,0 +1,56 @@
+name: Release
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-manager:
+    uses: ./.github/workflows/build-manager.yml
+    secrets: inherit
+  release:
+    needs:
+      - build-manager
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release scripts
+        uses: actions/checkout@v7
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+
+      # The APK already carries ksud, the kernel modules, ksuinit and the Sui
+      # payload for every supported ABI. The separate zip exposes the standalone
+      # kernelsu.ko and ksud builds; other outputs stay on the run page.
+      - name: Check the release APK
+        run: |
+          apk=$(ls manager/*.apk)
+          ls -la "$apk"
+
+          # The manager's update check reads the version code out of the asset
+          # name, so a name that does not match silently hides the release from
+          # every user.
+          name=$(basename "$apk")
+          if ! printf '%s' "$name" | grep -Eq '^[^_]+_v.+_[0-9]+-[a-z]+\.apk$'; then
+            echo "::error::$name does not match <app>_v<versionName>_<versionCode>-<buildType>.apk"
+            exit 1
+          fi
+
+      - name: Package kernel bundle
+        run: |
+          ./scripts/package-release-kernel-bundle.sh . "FinaSU_${GITHUB_REF_NAME}_kernel-bundle.zip"
+
+      - name: release
+        uses: softprops/action-gh-release@v3
+        with:
+          # A tag carrying a suffix (v0.1.0-beta1, v0.1.0-dev1, v0.1.0-rc1, ...) is published as a
+          # GitHub pre-release, which `/releases/latest` skips, so the manager's update check never
+          # offers test builds to users on a release build. A bare tag (v0.1.0) is published as a
+          # full release and becomes `/releases/latest` on its own, which is what users receive.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            manager/*.apk
+            FinaSU_*_kernel-bundle.zip
