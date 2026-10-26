@@ -37,7 +37,7 @@ jobs:
         with:
           filters: |
             kernel:
-              - 'FinaSU/**'
+              - 'KernelSU-Next/**'
               - '.gitmodules'
               - 'arch/**'
               - 'block/**'
@@ -142,81 +142,21 @@ jobs:
 
       - name: Setup Vendor Tree
         run: |
-          set -e
-
           echo "::group::Setting up Vendor Tree and Symlinks"
-
           mv vendor_repo/vendor ../vendor
           rm -rf vendor_repo
-
-          echo "=== Vendor tree ==="
-          test -d ../vendor/oplus/kernel || {
-            echo "ERROR: OPLUS vendor kernel tree is missing"
-            exit 1
-          }
-
-          echo "=== SecureGuard ==="
-          test -d ../vendor/oplus/kernel/secureguard || {
-            echo "ERROR: secureguard directory is missing"
-            exit 1
-          }
-
-          echo "Available SecureGuard trees:"
-          find ../vendor/oplus/kernel/secureguard -maxdepth 2 -type d -print | sort
-
-          # OPLUS performance placeholders
-          rm -f kernel/sched_assist
-          rm -f kernel/locking/klockopt
-
-          ln -s ../../vendor/oplus/kernel/oplus_performance/sched_assist \
-            kernel/sched_assist
-
-          ln -s ../../../vendor/oplus/kernel/oplus_performance/klockopt \
-            kernel/locking/klockopt
-
-          # OPLUS SecureGuard placeholders
-          # The vendor source contains the actual implementation under gki1.0.
-          rm -f arch/arm64/kernel/rootguard
-          rm -f kernel/keventupload
-
-          ln -s ../../../../vendor/oplus/kernel/secureguard/gki1.0/rootguard \
-            arch/arm64/kernel/rootguard
-
-          ln -s ../../vendor/oplus/kernel/secureguard/gki1.0/keventupload \
-            kernel/keventupload
-
-          echo "=== SecureGuard symlinks ==="
-          ls -la arch/arm64/kernel/rootguard
-          ls -la kernel/keventupload
-
-          test -f arch/arm64/kernel/rootguard/Kconfig || {
-            echo "ERROR: RootGuard Kconfig is not reachable"
-            exit 1
-          }
-
-          test -f arch/arm64/kernel/rootguard/Makefile || {
-            echo "ERROR: RootGuard Makefile is not reachable"
-            exit 1
-          }
-
-          test -f kernel/keventupload/Kconfig || {
-            echo "ERROR: KeventUpload Kconfig is not reachable"
-            exit 1
-          }
-
-          test -f kernel/keventupload/Makefile || {
-            echo "ERROR: KeventUpload Makefile is not reachable"
-            exit 1
-          }
-
-          echo "SecureGuard symlinks OK"
-
-          echo "=== Final symlink targets ==="
-          readlink -f arch/arm64/kernel/rootguard
-          readlink -f kernel/keventupload
-          readlink -f kernel/sched_assist
-          readlink -f kernel/locking/klockopt
-
+          ln -sfn "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/../kernel-4.19"
+          ln -sfn "$GITHUB_WORKSPACE/drivers" "$GITHUB_WORKSPACE/../drivers"
+          PATCH_DIR="$GITHUB_WORKSPACE/scripts/build/patches"
+          if [ -d "$PATCH_DIR" ]; then
+            for patch in "$PATCH_DIR"/*.patch; do
+              [ -e "$patch" ] || continue
+              echo "Applying vendor patch: $(basename "$patch")"
+              patch -d ../vendor -p1 --forward --batch < "$patch"
+            done
+          fi
+          ls -la ../vendor
+          ls -ld ../kernel-4.19
           echo "::endgroup::"
 
       - name: Install Build Dependencies
